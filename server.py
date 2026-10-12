@@ -49,9 +49,13 @@ def run_proxy_server():
         try:
             client_sock.settimeout(3.0)
             data = client_sock.recv(4096)
+            if not data:
+                client_sock.close()
+                continue
             
-            # Check for explicit WebSocket upgrade markers
-            if b"Upgrade: websocket" in data or b"sec-websocket-key" in data.lower():
+            data_lower = data.lower()
+            # Case-insensitive check for WebSocket upgrade headers
+            if b"upgrade: websocket" in data_lower or b"sec-websocket-key" in data_lower:
                 client_sock.settimeout(None)
                 threading.Thread(target=handle_websocket_tunnel, args=(client_sock, data), daemon=True).start()
             else:

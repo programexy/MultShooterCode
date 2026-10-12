@@ -1,7 +1,7 @@
 FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y \
-    python3 \
+    nginx \
     wget \
     unzip \
     libfontconfig1 \
@@ -20,12 +20,12 @@ COPY . /app
 
 EXPOSE 10000
 
-# Set environment variable explicitly for server mode
 ENV GODOT_SERVER=1
 
 RUN wget https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip \
     && unzip Godot_v4.7-stable_linux.x86_64.zip \
     && mv Godot_v4.7-stable_linux.x86_64 godot \
-    && chmod +x godot
+    && chmod +x godot \
+    && chmod +x start.sh
 
-CMD ["python3", "server.py"]
+CMD ["./start.sh"]

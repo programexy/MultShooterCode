@@ -2,61 +2,75 @@ import os
 import subprocess
 import socket
 import threading
+import select
 
 PORT = int(os.environ.get("PORT", 10000))
 GODOT_PORT = 8080
 
-# 1. Bind to the port immediately so Render detects an open port instantly
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server_socket.bind(("0.0.0.0", PORT))
-server_socket.listen(100)
-print(f"Immediate port binder listening on {PORT}")
-
-# 2. Start Godot Headless Server on secondary port
+# Start Godot Headless Server on a secondary internal port
 os.environ["PORT"] = str(GODOT_PORT)
 print(f"Launching Godot server on port {GODOT_PORT}...")
 godot_process = subprocess.Popen(["./godot", "--headless", "--main-pack", "project.pck"])
 
-def handle_connection(client_sock):
+def handle_websocket_tunnel(client_socket):
+    backend_socket = None
     try:
-        client_sock.settimeout(2.0)
-        data = client_sock.recv(1024)
+        backend_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        backend_socket.connect(("127.0.0.1", GODOT_PORT))
         
-        # If it's Render's health check (HTTP GET)
-        if b"GET /" in data and b"Upgrade: websocket" not in data:
-            response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK"
-            client_sock.sendall(response)
-            client_sock.close()
-            return
-
-        # Otherwise, forward WebSocket traffic to Godot
-        backend = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        backend.connect(("127.0.0.1", GODOT_PORT))
-        backend.sendall(data) # Forward initial bytes already read
-
-        # Simple bidirectional pipe
+        sockets = [client_socket, backend_socket]
         while True:
-            client_sock.settimeout(30.0)
-            r, _, _ = socket.select([client_sock, backend], [], [])
-            if client_sock in r:
-                d = client_sock.recv(4096)
-                if not d: break
-                backend.sendall(d)
-            if backend in r:
-                d = backend.recv(4096)
-                if not d: break
-                client_sock.sendall(d)
+            r, _, _ = select.select(sockets, [], [], 30)
+            if not r:
+                break
+            for s in r:
+                other = backend_socket if s is client_socket else client_socket
+                data = s.recv(4096)
+                if not data:
+                    return
+                other.sendall(data)
     except Exception:
         pass
     finally:
-        client_sock.close()
+        client_socket.close()
+        if backend_socket:
+            backend_socket.close()
 
-def accept_loops():
+def run_proxy_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", PORT))
+    server.listen(100)
+    print(f"Proxy server listening on port {PORT}")
+
     while True:
-        client_sock, _ = server_socket.accept()
-        threading.Thread(target=handle_connection, args=(client_sock,), daemon=True).start()
+        client_sock, _ = server.accept()
+        try:
+            client_sock.settimeout(3.0)
+            data = client_sock.recv(4096, socket.MSG_PEEK)
+            
+            if b"Upgrade: websocket" in data or b"sec-websocket-key" in data.lower():
+                client_sock.settimeout(None)
+                threading.Thread(target=handle_websocket_tunnel, args=(client_sock,), daemon=True).start()
+            else:
+                client_sock.settimeout(None)
+                client_sock.recv(4096) # Consume request
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Content-Length: 2\r\n"
+                    b"Connection: close\r\n\r\n"
+                    b"OK"
+                )
+                client_sock.sendall(response)
+                client_sock.close()
+        except Exception:
+            try:
+                client_sock.close()
+            except:
+                pass
 
-threading.Thread(target=accept_loops, daemon=True).start()
+# Start proxy server in background thread
+threading.Thread(target=run_proxy_server, daemon=True).start()
 
 godot_process.wait()

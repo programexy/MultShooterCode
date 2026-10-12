@@ -17,8 +17,6 @@ def handle_websocket_tunnel(client_socket, initial_data):
     try:
         backend_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         backend_socket.connect(("127.0.0.1", GODOT_PORT))
-        
-        # Forward the initial handshake bytes read during inspection
         backend_socket.sendall(initial_data)
         
         sockets = [client_socket, backend_socket]
@@ -50,12 +48,14 @@ def run_proxy_server():
         client_sock, _ = server.accept()
         try:
             client_sock.settimeout(3.0)
-            data = client_sock.recv(4096) # Read the actual request data
+            data = client_sock.recv(4096)
             
+            # Check for explicit WebSocket upgrade markers
             if b"Upgrade: websocket" in data or b"sec-websocket-key" in data.lower():
                 client_sock.settimeout(None)
                 threading.Thread(target=handle_websocket_tunnel, args=(client_sock, data), daemon=True).start()
             else:
+                # Answer all HTTP health checks and probes locally
                 client_sock.settimeout(None)
                 response = (
                     b"HTTP/1.1 200 OK\r\n"

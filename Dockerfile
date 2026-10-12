@@ -28,4 +28,4 @@ RUN wget https://github.com/godotengine/godot/releases/download/4.7-stable/Godot
     && mv Godot_v4.7-stable_linux.x86_64 godot \
     && chmod +x godot
 
-CMD ["./godot", "--headless", "--main-pack", "project.pck"]
+CMD ["python3", "server.py"]

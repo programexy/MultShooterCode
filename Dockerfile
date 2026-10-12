@@ -1,11 +1,18 @@
 FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y \
+    python3 \
     wget \
     unzip \
-    ca-certificates \
     libfontconfig1 \
+    libgl1 \
     libx11-6 \
+    libxcursor1 \
+    libxi6 \
+    libxinerama1 \
+    libxrandr2 \
+    libxrender1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
